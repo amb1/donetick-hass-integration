@@ -1,3 +1,4 @@
+> **Homelab-Fork** (`amb1/donetick-hass-integration`): adds native todo lists per Donetick label (`create_label_lists` → `todo.haushalt` & Co.). Track upstream via rebase; keep `# homelab` markers and `label_lists.py`. Apply with Homelab `scripts/homeassistant/apply-donetick-homelab-patch.py`.
 
 # Donetick Home Assistant Integration
 

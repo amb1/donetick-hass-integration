@@ -137,6 +137,17 @@ class DonetickAssignee:
     user_id: int
 
 @dataclass
+class DonetickLabel:
+    """Donetick label model (homelab)."""
+    id: Optional[int]
+    name: str
+    color: Optional[str] = None
+
+    @classmethod
+    def from_json(cls, data: dict) -> "DonetickLabel":
+        return cls(id=data.get("id"), name=data.get("name", ""), color=data.get("color"))
+
+@dataclass
 class DonetickTask:
     """Donetick task model."""
     id: int
@@ -161,6 +172,11 @@ class DonetickTask:
     start_time: Optional[datetime] = None
     timer_updated_at: Optional[datetime] = None
     assignee_ids: Optional[List[int]] = None
+    created_by: Optional[int] = None  # homelab (reminder)
+    is_private: bool = False  # homelab (reminder)
+    labels_v2: Optional[List[DonetickLabel]] = None  # homelab
+    label_names: Optional[List[str]] = None  # homelab
+    label_names_normalized: Optional[List[str]] = None  # homelab
     points: Optional[int] = None
 
     @property
@@ -179,6 +195,21 @@ class DonetickTask:
         if data.get("assignedTo"):
             if isinstance(data["assignedTo"], int):
                 assigned_to = data["assignedTo"]
+
+        # homelab: Labels für die Label-Listen aufbereiten
+        labels_v2: Optional[List[DonetickLabel]] = None
+        label_names: List[str] = []
+        if isinstance(data.get("labelsV2"), list):
+            labels_v2 = [DonetickLabel.from_json(label) for label in data["labelsV2"]]
+            label_names = [label.name for label in labels_v2 if label.name]
+        elif isinstance(data.get("labels"), str) and data.get("labels"):
+            label_names = [label.strip() for label in data["labels"].split(",") if label.strip()]
+        label_names_normalized = [name.lower() for name in label_names]
+
+        created_by = data.get("createdBy")
+        if created_by is not None and not isinstance(created_by, int):
+            created_by = None
+        is_private = bool(data.get("isPrivate") or data.get("is_private"))
           
         return cls(
             id=data["id"],
@@ -194,9 +225,14 @@ class DonetickTask:
             frequency_metadata=data.get("frequencyMetadata"),
             project_id=data.get("projectId"),
             assigned_to=assigned_to,
+            created_by=created_by,
+            is_private=is_private,
             assignee_ids=[assignee["userId"] for assignee in (data.get("assignees") or [])
                           if isinstance(assignee, dict) and isinstance(assignee.get("userId"), int)],
             description=_strip_inline_images(data.get("description")),
+            labels_v2=labels_v2,
+            label_names=label_names or None,
+            label_names_normalized=label_names_normalized or None,
             created_at=_parse_datetime(data.get("createdAt")),
             updated_at=_parse_datetime(data.get("updatedAt")),
             last_completed_date=_parse_datetime(data.get("lastCompletedDate")),

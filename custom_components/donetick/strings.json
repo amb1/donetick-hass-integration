@@ -30,6 +30,7 @@
           "create_unified_list": "Create \"All Tasks\" list",
           "create_project_lists": "Create individual task lists per project",
           "create_assignee_lists": "Create individual task lists per person",
+          "create_label_lists": "Create todo lists per label",
           "refresh_interval": "Refresh interval"
         }
       }
@@ -54,6 +55,7 @@
           "create_unified_list": "Create \"All Tasks\" list",
           "create_project_lists": "Create individual task lists per project",
           "create_assignee_lists": "Create individual task lists per person",
+          "create_label_lists": "Create todo lists per label",
           "refresh_interval": "Refresh interval"
         }
       },

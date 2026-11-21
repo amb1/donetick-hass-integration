@@ -9,6 +9,19 @@ CONF_SHOW_NO_DUE_DATE = "show_no_due_date"
 CONF_CREATE_UNIFIED_LIST = "create_unified_list"
 CONF_CREATE_PROJECT_LISTS = "create_project_lists"
 CONF_CREATE_ASSIGNEE_LISTS = "create_assignee_lists"
+CONF_CREATE_LABEL_LISTS = "create_label_lists"  # homelab
+
+# Homelab: leere Label-Listen trotzdem anlegen, damit die Familien-Dashboards sie finden.
+DEFAULT_LABEL_NAMES = (
+    "haushalt",
+    "kinder",
+    "schule",
+    "fußball",
+    "wohnung",
+    "privat",
+    "arbeit",
+    "musik",
+)
 CONF_REFRESH_INTERVAL = "refresh_interval"
 
 DEFAULT_REFRESH_INTERVAL = 900 # seconds - 15 minutes

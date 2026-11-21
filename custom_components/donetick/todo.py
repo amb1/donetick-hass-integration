@@ -2,7 +2,7 @@
 import logging
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 import traceback
 
 from homeassistant.components.todo import (
@@ -20,12 +20,19 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN, CONF_URL, CONF_TOKEN, CONF_SHOW_DUE_IN, CONF_SHOW_NO_DUE_DATE, CONF_CREATE_UNIFIED_LIST, CONF_CREATE_PROJECT_LISTS, CONF_CREATE_ASSIGNEE_LISTS
+from .const import DOMAIN, CONF_URL, CONF_TOKEN, CONF_SHOW_DUE_IN, CONF_SHOW_NO_DUE_DATE, CONF_CREATE_UNIFIED_LIST, CONF_CREATE_PROJECT_LISTS, CONF_CREATE_ASSIGNEE_LISTS, CONF_CREATE_LABEL_LISTS, DEFAULT_LABEL_NAMES
 from .api import DonetickApiClient
 from .user_mapping import completion_user
 from .model import DonetickProject, DonetickTask, DonetickMember
+from .label_lists import (  # homelab
+    collect_label_descriptors,
+    ensure_description_label_marker,
+    normalize_label_name,
+    task_matches_label,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +94,45 @@ async def async_setup_entry(
                 entities.append(entity)
         except Exception as e:
             _LOGGER.error("Failed to get projects: %s", e)
-    
+
+    # homelab: Listen pro Donetick-Label (todo.haushalt, todo.kinder, ...)
+    create_label_lists = config_entry.options.get(
+        CONF_CREATE_LABEL_LISTS, config_entry.data.get(CONF_CREATE_LABEL_LISTS, False)
+    )
+    if create_label_lists:
+        label_descriptors = collect_label_descriptors(coordinator.data or [])
+        seen = {
+            (d.get("normalized_name") or "").casefold()
+            for d in label_descriptors
+            if d.get("normalized_name")
+        }
+        for name in DEFAULT_LABEL_NAMES:
+            normalized = normalize_label_name(name)
+            if not normalized or normalized.casefold() in seen:
+                continue
+            label_descriptors.append(
+                {
+                    "label_id": None,
+                    "label_name": name,
+                    "normalized_name": normalized,
+                    "color": None,
+                }
+            )
+            seen.add(normalized.casefold())
+        label_descriptors.sort(key=lambda item: item["label_name"].lower())
+        _LOGGER.debug("Label lists enabled in config. Found %d labels", len(label_descriptors))
+        for descriptor in label_descriptors:
+            entity = DonetickLabelTasksList(
+                coordinator,
+                config_entry,
+                descriptor["label_id"],
+                descriptor["label_name"],
+                descriptor["normalized_name"],
+                descriptor["color"],
+            )
+            entity._circle_members = circle_members
+            entities.append(entity)
+
     _LOGGER.debug("Creating %d total entities", len(entities))
     async_add_entities(entities)
 
@@ -251,7 +296,7 @@ class DonetickTodoListBase(CoordinatorEntity, TodoListEntity):
             
             result = await client.async_create_task(
                 name=item.summary,
-                description=item.description,
+                description=self._create_description(item.description),
                 due_date=due_date,
                 created_by=created_by,
                 project_id=project_id
@@ -362,6 +407,10 @@ class DonetickTodoListBase(CoordinatorEntity, TodoListEntity):
         # For Anyone tasks, omit completedBy so Donetick uses the API token owner.
         return completion_user(self._config_entry, context, default=task.assigned_to)
 
+    def _create_description(self, description: str | None) -> str | None:
+        """Return description used when creating a task from this list (homelab hook)."""
+        return description
+
 
 class DonetickAllTasksList(DonetickTodoListBase):
     """Donetick All Tasks List entity."""
@@ -407,6 +456,55 @@ class DonetickAssigneeTasksList(DonetickTodoListBase):
     def _filter_tasks(self, tasks):
         """Return tasks assigned to this member."""
         return [task for task in tasks if task.is_active and task.assigned_to == self._member.user_id]
+
+class DonetickLabelTasksList(DonetickTodoListBase):
+    """Donetick label-specific tasks list entity (homelab)."""
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        config_entry: ConfigEntry,
+        label_id: Optional[int],
+        label_name: str,
+        normalized_name: Optional[str],
+        color: Optional[str] = None,
+    ) -> None:
+        super().__init__(coordinator, config_entry)
+        self._label_id = label_id
+        self._label_name = label_name or "Label"
+        self._normalized_name = normalized_name
+        self._label_color = color
+        slug_source = slugify(self._label_name) if self._label_name else None
+        if not slug_source and self._normalized_name:
+            slug_source = self._normalized_name.replace(" ", "_")
+        if not slug_source:
+            slug_source = f"label_{label_id or 'unknown'}"
+        if label_id is not None:
+            slug_source = f"{slug_source}_{label_id}"
+        self._attr_unique_id = f"dt_{config_entry.entry_id}_label_{slug_source}"
+        self._attr_name = self._label_name
+
+    def _filter_tasks(self, tasks):
+        return [
+            task
+            for task in tasks
+            if task.is_active
+            and task_matches_label(
+                task, label_id=self._label_id, normalized_name=self._normalized_name
+            )
+        ]
+
+    @property
+    def extra_state_attributes(self):
+        attrs = dict(super().extra_state_attributes or {})
+        attrs.update({"label_id": self._label_id, "label_name": self._label_name})
+        if self._label_color:
+            attrs["label_color"] = self._label_color
+        return attrs
+
+    def _create_description(self, description: str | None) -> str | None:
+        return ensure_description_label_marker(description, self._normalized_name)
+
 
 # Keep the old class for backward compatibility
 class DonetickTodoListEntity(DonetickAllTasksList):
